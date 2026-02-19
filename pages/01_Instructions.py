@@ -3,6 +3,16 @@ import streamlit as st
 # --- GLOBAL RTL + STYLE FIXES ---
 st.markdown("""
 <style>
+            
+/* Force dark background */
+.stApp {
+    background-color: #1E1E2E !important;
+}
+
+/* Also cover the sidebar and main block */
+section[data-testid="stSidebar"] {
+    background-color: #16161E !important;
+}
 
 /* Full RTL support */
 html, body, [class*="css"], .stMarkdown, .stText, p, div, ul, li {
