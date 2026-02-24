@@ -9,17 +9,17 @@ MAX_COUNTED_TRIALS = 60
 
 
 def _init_state():
-    st.session_state.trials                  = generate_all_trials(trials_per_rule=10, transition_trials=3)
-    st.session_state.trial                   = 0
-    st.session_state.counted_trials          = 0   # every answered trial, including first-of-rule
-    st.session_state.score                   = 0   # correct answers (excl. first-of-rule)
-    st.session_state.consecutive_correct     = 0
-    st.session_state.rules_found             = 0
-    st.session_state.perseveration_errors    = 0
+    st.session_state.trials                   = generate_all_trials(trials_per_rule=10, transition_trials=3)
+    st.session_state.trial                    = 0
+    st.session_state.counted_trials           = 0
+    st.session_state.score                    = 0
+    st.session_state.consecutive_correct      = 0
+    st.session_state.rules_found              = 0
+    st.session_state.perseveration_errors     = 0
     st.session_state.non_perseveration_errors = 0
-    st.session_state.feedback                = None
-    st.session_state.show_feedback           = False
-    st.session_state.rule_end_message        = False
+    st.session_state.feedback                 = None
+    st.session_state.show_feedback            = False
+    st.session_state.rule_end_message         = False
 
 
 if "trials" not in st.session_state:
@@ -33,7 +33,9 @@ def _is_first_trial_of_rule(trial_data):
 
 
 def _advance_to_next_rule():
+    """Jump to the first trial of the next rule and always reset the streak."""
     current_rule = TRIALS[st.session_state.trial]["rule"]
+    st.session_state.consecutive_correct = 0   # streak never carries across rules
     for i, t in enumerate(TRIALS):
         if t["rule"] > current_rule:
             st.session_state.trial = i
@@ -74,13 +76,12 @@ st.caption(
 
 st.image(trial_data["main_path"], width=260)
 
-# Rule-end message
+# Rule-end message (10th trial exhausted)
 if st.session_state.rule_end_message:
     st.info("### השלב הסתיים, עוברים לשלב הבא")
     time.sleep(2)
     st.session_state.rule_end_message = False
-    _advance_to_next_rule()
-    st.session_state.consecutive_correct = 0
+    _advance_to_next_rule()   # resets streak internally
     st.rerun()
 
 # Feedback display + advance
@@ -101,7 +102,8 @@ if st.session_state.show_feedback:
     is_last_trial = trial_data["trial_index_in_rule"] == 9
 
     if streak >= 3:
-        st.session_state.consecutive_correct = 0
+        # Streak was already acted on in the button handler (advance + rules_found).
+        # consecutive_correct was reset inside _advance_to_next_rule().
         st.rerun()
     elif is_last_trial:
         st.session_state.rule_end_message = True
@@ -123,8 +125,12 @@ for i, col in enumerate(cols):
             # Always count toward the 60-trial total
             st.session_state.counted_trials += 1
 
-            # Score and error tracking — skip first trial of each rule
-            if not first_of_rule:
+            if first_of_rule:
+                # First trial of rule: reset streak (new rule, clean slate),
+                # but do not score or classify errors.
+                st.session_state.consecutive_correct = 0
+            else:
+                # Scored trial
                 if fb == "correct":
                     st.session_state.score += 1
                     st.session_state.consecutive_correct += 1
@@ -134,17 +140,11 @@ for i, col in enumerate(cols):
                         st.session_state.perseveration_errors += 1
                     else:
                         st.session_state.non_perseveration_errors += 1
-            else:
-                # First trial: streak tracking only, no score/error
-                if fb == "correct":
-                    st.session_state.consecutive_correct += 1
-                else:
-                    st.session_state.consecutive_correct = 0
 
-            # Rule advancement via 3-in-a-row streak
+            # Rule advancement via 3-in-a-row streak (only possible on scored trials)
             if st.session_state.consecutive_correct >= 3:
                 st.session_state.rules_found += 1
-                _advance_to_next_rule()
+                _advance_to_next_rule()   # resets streak internally
 
             st.session_state.feedback      = fb
             st.session_state.show_feedback = True
