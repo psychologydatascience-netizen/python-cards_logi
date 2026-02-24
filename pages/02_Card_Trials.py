@@ -5,7 +5,7 @@ import streamlit as st
 import time
 from card_generator import generate_all_trials, check_answer, is_perseveration
 
-MAX_COUNTED_TRIALS = 60
+MAX_COUNTED_TRIALS = 50
 
 
 def _init_state():
@@ -67,7 +67,7 @@ rule_num      = trial_data["rule"]
 stage         = 1 if rule_num <= 2 else 2
 first_of_rule = _is_first_trial_of_rule(trial_data)
 
-st.title(f"Trial {st.session_state.trial + 1}")
+st.title(f"Trial {st.session_state.counted_trials + 1} / {MAX_COUNTED_TRIALS}")
 st.caption(
     f"Stage {stage} · Rule {rule_num} · "
     f"Trial {trial_data['trial_index_in_rule'] + 1}/10 · "
