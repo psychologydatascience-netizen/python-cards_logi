@@ -5,7 +5,7 @@ import streamlit as st
 import time
 from card_generator import generate_all_trials, check_answer, is_perseveration
 
-MAX_COUNTED_TRIALS = 50
+MAX_COUNTED_TRIALS = 40
 
 
 def _init_state():

@@ -150,6 +150,30 @@ def _build_wrong_cards(main, rf, active_positions, rule_num):
                 gnr(main, active_positions, rf, 2),
                 gnr(main, active_positions, rf, 2)]
 
+#--------------------
+#validator functions
+#--------------------
+def options_have_uniform_feature(options, active_positions):
+    """
+    Returns True if ALL 4 option cards share the same value
+    in ANY feature position.
+    """
+    for p in active_positions:
+        values = {card[p] for card in options}
+        if len(values) == 1:
+            return True
+    return False
+
+def options_have_duplicates(options):
+    """True if any two option cards are identical."""
+    seen = set()
+    for card in options:
+        code = tuple(card)
+        if code in seen:
+            return True
+        seen.add(code)
+    return False
+
 
 # ---------------------------------------------------------------------------
 # Single trial generator
@@ -159,19 +183,25 @@ def generate_trial(rule_num, rule_features, active_positions,
                    prev_rule_features=None, is_transition=False):
     rf     = list(rule_features)
     non_rf = [p for p in active_positions if p not in rf]
+    for attempt in range(100):
+        main    = generate_random_card(active_positions)
+        correct = _build_correct(main, rf, non_rf, active_positions)
+        wrong   = _build_wrong_cards(main, rf, active_positions, rule_num)
 
-    main    = generate_random_card(active_positions)
-    correct = _build_correct(main, rf, non_rf, active_positions)
-    wrong   = _build_wrong_cards(main, rf, active_positions, rule_num)
+        if is_transition and prev_rule_features:
+            prf     = list(prev_rule_features)
+            non_prf = [p for p in active_positions if p not in prf]
+            wrong[-1] = generate_matching_card(main, active_positions, 2,
+                                            must_match=set(prf),
+                                            must_differ=set(non_prf))
 
-    if is_transition and prev_rule_features:
-        prf     = list(prev_rule_features)
-        non_prf = [p for p in active_positions if p not in prf]
-        wrong[-1] = generate_matching_card(main, active_positions, 2,
-                                           must_match=set(prf),
-                                           must_differ=set(non_prf))
-
-    options = [correct] + wrong
+        options = [correct] + wrong
+        if (not options_have_uniform_feature(options, active_positions)
+            and not options_have_duplicates(options)):
+            break
+    else:
+        raise RuntimeError("Failed to generate valid trial after 100 attempts")
+        
     perm    = list(range(4))
     random.shuffle(perm)
     shuffled      = [options[i] for i in perm]
