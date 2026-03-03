@@ -223,7 +223,8 @@ for i, col in enumerate(cols):
                         if cur_matched == prev_pos:
                             is_extreme = True
                         # Case 3: chose the complementary pair
-                        elif cur_matched == complementary:
+                        # (only meaningful in stage 2 where complement has ≥2 positions)
+                        elif len(complementary) >= 2 and cur_matched == complementary:
                             is_extreme = True
 
                     # Case 4: previous was fully wrong → this answer is not fully correct
