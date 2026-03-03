@@ -20,6 +20,9 @@ def _init_state():
     st.session_state.feedback                 = None
     st.session_state.show_feedback            = False
     st.session_state.rule_end_message         = False
+    # ── Rule-trial limit (8 base, +1 per correct answer on last trial, max 10) ──
+    st.session_state.rule_ends_at_index       = 7   # 0-based; trial 8 is the default last
+    st.session_state.pending_rule_end         = False
     # ── Timing ──────────────────────────────────────────────────────────────
     st.session_state.trial_start_time         = time.time()
     st.session_state.experiment_start_time    = time.time()
@@ -40,6 +43,7 @@ def _advance_to_next_rule():
     """Jump to the first trial of the next rule and always reset the streak."""
     current_rule = TRIALS[st.session_state.trial]["rule"]
     st.session_state.consecutive_correct = 0
+    st.session_state.rule_ends_at_index  = 7   # reset to 8-trial limit for new rule
     for i, t in enumerate(TRIALS):
         if t["rule"] > current_rule:
             st.session_state.trial = i
@@ -124,6 +128,7 @@ if st.session_state.rule_end_message:
     st.info("### השלב הסתיים, עוברים לשלב הבא")
     time.sleep(2)
     st.session_state.rule_end_message = False
+    st.session_state.pending_rule_end = False
     _advance_to_next_rule()
     st.session_state.trial_start_time = time.time()   # reset timer for new trial
     st.rerun()
@@ -143,7 +148,7 @@ if st.session_state.show_feedback:
     st.session_state.feedback = None
 
     streak        = st.session_state.consecutive_correct
-    is_last_trial = trial_data["trial_index_in_rule"] == 9
+    is_last_trial = st.session_state.pending_rule_end
 
     if streak >= 3:
         st.rerun()
@@ -188,6 +193,20 @@ for i, col in enumerate(cols):
             if st.session_state.consecutive_correct >= 3:
                 st.session_state.rules_found += 1
                 _advance_to_next_rule()
+                st.session_state.pending_rule_end = False
+            else:
+                # Check whether this was the last allowed trial for this rule
+                on_last = trial_data["trial_index_in_rule"] == st.session_state.rule_ends_at_index
+                if on_last:
+                    # Correct on last trial and still have bonus budget → extend by 1
+                    if fb == "correct" and st.session_state.rule_ends_at_index < 9:
+                        st.session_state.rule_ends_at_index += 1
+                        st.session_state.pending_rule_end = False
+                    else:
+                        # Wrong answer on last trial, OR budget exhausted → end rule
+                        st.session_state.pending_rule_end = True
+                else:
+                    st.session_state.pending_rule_end = False
 
             st.session_state.feedback      = fb
             st.session_state.show_feedback = True
