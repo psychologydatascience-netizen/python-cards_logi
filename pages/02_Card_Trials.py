@@ -17,6 +17,11 @@ def _init_state():
     st.session_state.rules_found              = 0
     st.session_state.perseveration_errors     = 0
     st.session_state.non_perseveration_errors = 0
+    st.session_state.extreme_mistakes         = 0
+    # ── Prev-answer context (for extreme-mistake detection) ──────────────────
+    st.session_state.prev_answer_feedback     = None   # "correct"/"half_correct"/"incorrect"
+    st.session_state.prev_matched_positions   = None   # frozenset of matched positions
+    st.session_state.prev_answer_rule         = None   # rule number of that answer
     st.session_state.feedback                 = None
     st.session_state.show_feedback            = False
     st.session_state.rule_end_message         = False
@@ -25,7 +30,7 @@ def _init_state():
     st.session_state.pending_rule_end         = False
     # ── Timing ──────────────────────────────────────────────────────────────
     st.session_state.trial_start_time         = time.time()
-    st.session_state.experiment_start_time    = time.time()
+    st.session_state.test_start_time    = time.time()
     st.session_state.trial_times              = []   # list of (trial_number, seconds)
 
 
@@ -42,13 +47,21 @@ def _is_first_trial_of_rule(trial_data):
 def _advance_to_next_rule():
     """Jump to the first trial of the next rule and always reset the streak."""
     current_rule = TRIALS[st.session_state.trial]["rule"]
-    st.session_state.consecutive_correct = 0
-    st.session_state.rule_ends_at_index  = 7   # reset to 8-trial limit for new rule
+    st.session_state.consecutive_correct    = 0
+    st.session_state.rule_ends_at_index     = 7
+    st.session_state.prev_answer_feedback   = None   # cross-rule context is cleared
+    st.session_state.prev_matched_positions = None
+    st.session_state.prev_answer_rule       = None
     for i, t in enumerate(TRIALS):
         if t["rule"] > current_rule:
             st.session_state.trial = i
             return
     st.session_state.trial = len(TRIALS)
+
+
+def _get_matched_positions(main, selected, active_positions):
+    """Return frozenset of positions where main and selected share the same value."""
+    return frozenset(p for p in active_positions if main[p] == selected[p])
 
 
 def _game_over():
@@ -64,7 +77,7 @@ def _fmt(seconds):
 
 # ── End screen ──────────────────────────────────────────────────────────────
 if _game_over():
-    total_elapsed = time.time() - st.session_state.experiment_start_time
+    total_elapsed = time.time() - st.session_state.test_start_time
 
     st.title("Done!")
     st.write(f"**Total trials:** {st.session_state.counted_trials} / {MAX_COUNTED_TRIALS}")
@@ -72,10 +85,11 @@ if _game_over():
     st.write(f"**Rules found (3-in-a-row):** {st.session_state.rules_found}")
     st.write(f"**Perseveration errors:** {st.session_state.perseveration_errors}")
     st.write(f"**Non-perseveration errors:** {st.session_state.non_perseveration_errors}")
+    st.write(f"**Extreme mistakes:** {st.session_state.extreme_mistakes}")
 
     # ── Timing summary ───────────────────────────────────────────────────────
     st.divider()
-    st.subheader(f"⏱ Total experiment time: {_fmt(total_elapsed)}")
+    st.subheader(f"⏱ Total test time: {_fmt(total_elapsed)}")
 
     trial_times = st.session_state.trial_times
     if trial_times:
@@ -110,14 +124,14 @@ first_of_rule = _is_first_trial_of_rule(trial_data)
 # ── Live timer display ───────────────────────────────────────────────────────
 elapsed_this_trial = time.time() - st.session_state.trial_start_time
 timer_col, title_col = st.columns([1, 4])
-with timer_col:
-    st.metric("⏱ This trial", _fmt(elapsed_this_trial))
+#with timer_col:
+#    st.metric("⏱ This trial", _fmt(elapsed_this_trial))
 with title_col:
     st.title(f"Trial {st.session_state.counted_trials + 1} / {MAX_COUNTED_TRIALS}")
 
 st.caption(
     f"Stage {stage} · Rule {rule_num} · "
-    f"Trial {trial_data['trial_index_in_rule'] + 1}/10 · "
+    f"Trial {trial_data['trial_index_in_rule'] + 1}/(8+2) · "
     f"Counted: {st.session_state.counted_trials}/{MAX_COUNTED_TRIALS}"
 )
 
@@ -179,7 +193,47 @@ for i, col in enumerate(cols):
 
             if first_of_rule:
                 st.session_state.consecutive_correct = 0
+                # First trial of a new rule: clear prev context (cross-rule doesn't count)
+                st.session_state.prev_answer_feedback   = None
+                st.session_state.prev_matched_positions = None
+                st.session_state.prev_answer_rule       = None
             else:
+                active   = trial_data["active_positions"]
+                main_c   = trial_data["main"]
+                selected_card = trial_data["options"][i]
+                cur_matched  = _get_matched_positions(main_c, selected_card, active)
+
+                # ── Extreme mistake detection ────────────────────────────────
+                prev_fb   = st.session_state.prev_answer_feedback
+                prev_pos  = st.session_state.prev_matched_positions
+                prev_rule = st.session_state.prev_answer_rule
+                same_rule = (prev_rule == rule_num)
+
+                is_extreme = False
+
+                if fb != "correct":
+                    # Case 1: perseveration (also counted in perseveration_errors below)
+                    if is_perseveration(trial_data, i):
+                        is_extreme = True
+
+                    # Cases 2 & 3: only within the same rule
+                    elif same_rule and prev_fb == "half_correct" and prev_pos is not None:
+                        complementary = frozenset(active) - prev_pos
+                        # Case 2: chose the exact same matching pair again
+                        if cur_matched == prev_pos:
+                            is_extreme = True
+                        # Case 3: chose the complementary pair
+                        elif cur_matched == complementary:
+                            is_extreme = True
+
+                    # Case 4: previous was fully wrong → this answer is not fully correct
+                    elif same_rule and prev_fb == "incorrect":
+                        is_extreme = True
+
+                if is_extreme:
+                    st.session_state.extreme_mistakes += 1
+
+                # ── Standard scoring ─────────────────────────────────────────
                 if fb == "correct":
                     st.session_state.score += 1
                     st.session_state.consecutive_correct += 1
@@ -189,6 +243,11 @@ for i, col in enumerate(cols):
                         st.session_state.perseveration_errors += 1
                     else:
                         st.session_state.non_perseveration_errors += 1
+
+                # ── Update prev-answer context for next trial ─────────────────
+                st.session_state.prev_answer_feedback   = fb
+                st.session_state.prev_matched_positions = cur_matched
+                st.session_state.prev_answer_rule       = rule_num
 
             if st.session_state.consecutive_correct >= 3:
                 st.session_state.rules_found += 1
