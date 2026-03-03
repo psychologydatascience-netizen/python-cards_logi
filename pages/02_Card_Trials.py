@@ -20,6 +20,10 @@ def _init_state():
     st.session_state.feedback                 = None
     st.session_state.show_feedback            = False
     st.session_state.rule_end_message         = False
+    # ── Timing ──────────────────────────────────────────────────────────────
+    st.session_state.trial_start_time         = time.time()
+    st.session_state.experiment_start_time    = time.time()
+    st.session_state.trial_times              = []   # list of (trial_number, seconds)
 
 
 if "trials" not in st.session_state:
@@ -35,7 +39,7 @@ def _is_first_trial_of_rule(trial_data):
 def _advance_to_next_rule():
     """Jump to the first trial of the next rule and always reset the streak."""
     current_rule = TRIALS[st.session_state.trial]["rule"]
-    st.session_state.consecutive_correct = 0   # streak never carries across rules
+    st.session_state.consecutive_correct = 0
     for i, t in enumerate(TRIALS):
         if t["rule"] > current_rule:
             st.session_state.trial = i
@@ -48,14 +52,46 @@ def _game_over():
             st.session_state.trial >= len(TRIALS))
 
 
-# End screen
+def _fmt(seconds):
+    """Format seconds as mm:ss.t  (e.g. 01:24.3)"""
+    m, s = divmod(seconds, 60)
+    return f"{int(m):02d}:{s:04.1f}"
+
+
+# ── End screen ──────────────────────────────────────────────────────────────
 if _game_over():
+    total_elapsed = time.time() - st.session_state.experiment_start_time
+
     st.title("Done!")
     st.write(f"**Total trials:** {st.session_state.counted_trials} / {MAX_COUNTED_TRIALS}")
     st.write(f"**Correct answers:** {st.session_state.score}")
     st.write(f"**Rules found (3-in-a-row):** {st.session_state.rules_found}")
     st.write(f"**Perseveration errors:** {st.session_state.perseveration_errors}")
     st.write(f"**Non-perseveration errors:** {st.session_state.non_perseveration_errors}")
+
+    # ── Timing summary ───────────────────────────────────────────────────────
+    st.divider()
+    st.subheader(f"⏱ Total experiment time: {_fmt(total_elapsed)}")
+
+    trial_times = st.session_state.trial_times
+    if trial_times:
+        avg = sum(t for _, t in trial_times) / len(trial_times)
+        slowest_num, slowest_t = max(trial_times, key=lambda x: x[1])
+        fastest_num, fastest_t = min(trial_times, key=lambda x: x[1])
+
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Average per trial", _fmt(avg))
+        col2.metric(f"Slowest (trial {slowest_num})", _fmt(slowest_t))
+        col3.metric(f"Fastest (trial {fastest_num})", _fmt(fastest_t))
+
+        st.divider()
+        st.write("**Per-trial breakdown:**")
+
+        header = "| Trial | Time |\n|-------|------|\n"
+        body   = "\n".join(f"| {n} | {_fmt(t)} |" for n, t in trial_times)
+        st.markdown(header + body)
+
+    st.divider()
     if st.button("Restart"):
         _init_state()
         st.rerun()
@@ -67,7 +103,14 @@ rule_num      = trial_data["rule"]
 stage         = 1 if rule_num <= 2 else 2
 first_of_rule = _is_first_trial_of_rule(trial_data)
 
-st.title(f"Trial {st.session_state.counted_trials + 1} / {MAX_COUNTED_TRIALS}")
+# ── Live timer display ───────────────────────────────────────────────────────
+elapsed_this_trial = time.time() - st.session_state.trial_start_time
+timer_col, title_col = st.columns([1, 4])
+with timer_col:
+    st.metric("⏱ This trial", _fmt(elapsed_this_trial))
+with title_col:
+    st.title(f"Trial {st.session_state.counted_trials + 1} / {MAX_COUNTED_TRIALS}")
+
 st.caption(
     f"Stage {stage} · Rule {rule_num} · "
     f"Trial {trial_data['trial_index_in_rule'] + 1}/10 · "
@@ -81,7 +124,8 @@ if st.session_state.rule_end_message:
     st.info("### השלב הסתיים, עוברים לשלב הבא")
     time.sleep(2)
     st.session_state.rule_end_message = False
-    _advance_to_next_rule()   # resets streak internally
+    _advance_to_next_rule()
+    st.session_state.trial_start_time = time.time()   # reset timer for new trial
     st.rerun()
 
 # Feedback display + advance
@@ -102,8 +146,6 @@ if st.session_state.show_feedback:
     is_last_trial = trial_data["trial_index_in_rule"] == 9
 
     if streak >= 3:
-        # Streak was already acted on in the button handler (advance + rules_found).
-        # consecutive_correct was reset inside _advance_to_next_rule().
         st.rerun()
     elif is_last_trial:
         st.session_state.rule_end_message = True
@@ -120,17 +162,19 @@ for i, col in enumerate(cols):
     with col:
         st.image(trial_data["option_paths"][i], width=120)
         if st.button("Select", key=f"opt_{st.session_state.trial}_{i}"):
+            # ── Record trial time ────────────────────────────────────────────
+            elapsed = time.time() - st.session_state.trial_start_time
+            trial_number = st.session_state.counted_trials + 1
+            st.session_state.trial_times.append((trial_number, elapsed))
+            st.session_state.trial_start_time = time.time()   # reset for next trial
+
             fb = check_answer(trial_data, i)
 
-            # Always count toward the 60-trial total
             st.session_state.counted_trials += 1
 
             if first_of_rule:
-                # First trial of rule: reset streak (new rule, clean slate),
-                # but do not score or classify errors.
                 st.session_state.consecutive_correct = 0
             else:
-                # Scored trial
                 if fb == "correct":
                     st.session_state.score += 1
                     st.session_state.consecutive_correct += 1
@@ -141,10 +185,9 @@ for i, col in enumerate(cols):
                     else:
                         st.session_state.non_perseveration_errors += 1
 
-            # Rule advancement via 3-in-a-row streak (only possible on scored trials)
             if st.session_state.consecutive_correct >= 3:
                 st.session_state.rules_found += 1
-                _advance_to_next_rule()   # resets streak internally
+                _advance_to_next_rule()
 
             st.session_state.feedback      = fb
             st.session_state.show_feedback = True
