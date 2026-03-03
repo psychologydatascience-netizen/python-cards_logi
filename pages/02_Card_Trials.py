@@ -26,11 +26,12 @@ def _init_state():
     st.session_state.show_feedback            = False
     st.session_state.rule_end_message         = False
     # ── Rule-trial limit (8 base, +1 per correct answer on last trial, max 10) ──
-    st.session_state.rule_ends_at_index       = 7   # 0-based; trial 8 is the default last
+    st.session_state.rule_ends_at_index       = 7
     st.session_state.pending_rule_end         = False
+    st.session_state.rule_just_advanced       = False   # prevents double-skip after streak
     # ── Timing ──────────────────────────────────────────────────────────────
     st.session_state.trial_start_time         = time.time()
-    st.session_state.test_start_time    = time.time()
+    st.session_state.experiment_start_time    = time.time()
     st.session_state.trial_times              = []   # list of (trial_number, seconds)
 
 
@@ -77,7 +78,7 @@ def _fmt(seconds):
 
 # ── End screen ──────────────────────────────────────────────────────────────
 if _game_over():
-    total_elapsed = time.time() - st.session_state.test_start_time
+    total_elapsed = time.time() - st.session_state.experiment_start_time
 
     st.title("Done!")
     st.write(f"**Total trials:** {st.session_state.counted_trials} / {MAX_COUNTED_TRIALS}")
@@ -89,7 +90,7 @@ if _game_over():
 
     # ── Timing summary ───────────────────────────────────────────────────────
     st.divider()
-    st.subheader(f"⏱ Total test time: {_fmt(total_elapsed)}")
+    st.subheader(f"⏱ Total experiment time: {_fmt(total_elapsed)}")
 
     trial_times = st.session_state.trial_times
     if trial_times:
@@ -124,14 +125,14 @@ first_of_rule = _is_first_trial_of_rule(trial_data)
 # ── Live timer display ───────────────────────────────────────────────────────
 elapsed_this_trial = time.time() - st.session_state.trial_start_time
 timer_col, title_col = st.columns([1, 4])
-#with timer_col:
-#    st.metric("⏱ This trial", _fmt(elapsed_this_trial))
+with timer_col:
+    st.metric("⏱ This trial", _fmt(elapsed_this_trial))
 with title_col:
     st.title(f"Trial {st.session_state.counted_trials + 1} / {MAX_COUNTED_TRIALS}")
 
 st.caption(
     f"Stage {stage} · Rule {rule_num} · "
-    f"Trial {trial_data['trial_index_in_rule'] + 1}/(8+2) · "
+    f"Trial {trial_data['trial_index_in_rule'] + 1}/10 · "
     f"Counted: {st.session_state.counted_trials}/{MAX_COUNTED_TRIALS}"
 )
 
@@ -164,7 +165,9 @@ if st.session_state.show_feedback:
     streak        = st.session_state.consecutive_correct
     is_last_trial = st.session_state.pending_rule_end
 
-    if streak >= 3:
+    if st.session_state.rule_just_advanced:
+        # trial pointer already set to first trial of new rule — don't increment
+        st.session_state.rule_just_advanced = False
         st.rerun()
     elif is_last_trial:
         st.session_state.rule_end_message = True
@@ -253,7 +256,8 @@ for i, col in enumerate(cols):
             if st.session_state.consecutive_correct >= 3:
                 st.session_state.rules_found += 1
                 _advance_to_next_rule()
-                st.session_state.pending_rule_end = False
+                st.session_state.pending_rule_end   = False
+                st.session_state.rule_just_advanced = True
             else:
                 # Check whether this was the last allowed trial for this rule
                 on_last = trial_data["trial_index_in_rule"] == st.session_state.rule_ends_at_index
